@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 from fastapi import (
     Depends,
     HTTPException,
+    status,
 )
 
 from fastapi.security import (
@@ -18,7 +19,6 @@ from supabase import create_client
 # =========================================================
 # ENVIRONMENT
 # =========================================================
-
 
 load_dotenv()
 
@@ -45,17 +45,16 @@ if not SUPABASE_KEY:
 
 
 # =========================================================
-# AUTHENTICATION CLIENT
+# SUPABASE AUTH CLIENT
 # =========================================================
 #
-# Dedicated server-side client used only for
-# Supabase access-token verification.
+# This client is used only to verify the Supabase
+# access token sent by the frontend.
 #
-# No access token is logged.
-# No Authorization header is logged.
-# No user_id is accepted from the frontend.
+# IMPORTANT:
+# The actual user's identity always comes from
+# the verified access token.
 # =========================================================
-
 
 auth_supabase = create_client(
     SUPABASE_URL,
@@ -67,7 +66,6 @@ auth_supabase = create_client(
 # HTTP BEARER SECURITY
 # =========================================================
 
-
 security = HTTPBearer(
     auto_error=False
 )
@@ -76,7 +74,6 @@ security = HTTPBearer(
 # =========================================================
 # GET CURRENT AUTHENTICATED USER
 # =========================================================
-
 
 async def get_current_user(
     credentials:
@@ -87,34 +84,42 @@ async def get_current_user(
     Verify the Supabase access token and return
     the authenticated Supabase user.
 
-    The authenticated identity comes exclusively
-    from the verified access token.
-
     The frontend cannot provide or override user_id.
     """
 
     # =====================================================
-    # CHECK AUTHORIZATION HEADER
+    # AUTHORIZATION HEADER
     # =====================================================
 
     if credentials is None:
+
         raise HTTPException(
-            status_code=401,
+            status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Missing authorization header",
+            headers={
+                "WWW-Authenticate": "Bearer"
+            },
         )
 
 
     # =====================================================
-    # GET ACCESS TOKEN
+    # ACCESS TOKEN
     # =====================================================
 
-    token = credentials.credentials
+    token = (
+        credentials.credentials
+        or ""
+    ).strip()
 
 
     if not token:
+
         raise HTTPException(
-            status_code=401,
+            status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Missing access token",
+            headers={
+                "WWW-Authenticate": "Bearer"
+            },
         )
 
 
@@ -123,9 +128,13 @@ async def get_current_user(
     # =====================================================
 
     if token.count(".") != 2:
+
         raise HTTPException(
-            status_code=401,
+            status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid access token format",
+            headers={
+                "WWW-Authenticate": "Bearer"
+            },
         )
 
 
@@ -134,24 +143,34 @@ async def get_current_user(
     # =====================================================
 
     try:
+
         response = (
             auth_supabase
             .auth
             .get_user(token)
         )
 
-        user = response.user
+
+        user = getattr(
+            response,
+            "user",
+            None,
+        )
 
 
-        if not user:
+        if user is None:
+
             raise HTTPException(
-                status_code=401,
+                status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid or expired session",
+                headers={
+                    "WWW-Authenticate": "Bearer"
+                },
             )
 
 
         # =================================================
-        # VERIFIED USER
+        # SUCCESS
         # =================================================
 
         return user
@@ -161,14 +180,30 @@ async def get_current_user(
         raise
 
 
-    except Exception:
+    except Exception as error:
+
+        # -------------------------------------------------
+        # SAFE SERVER-SIDE DIAGNOSTIC
+        #
         # Never log:
-        # - access token
+        # - token
         # - Authorization header
+        # - email
         # - user data
-        # - exception contents
+        #
+        # We log only the exception TYPE.
+        # -------------------------------------------------
+
+        print(
+            "Supabase authentication error:",
+            type(error).__name__,
+        )
+
 
         raise HTTPException(
-            status_code=401,
+            status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired session",
+            headers={
+                "WWW-Authenticate": "Bearer"
+            },
         )
