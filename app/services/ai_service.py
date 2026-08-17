@@ -191,9 +191,8 @@ def ask_document_question(
     )
 
     safe_question = sanitize_question(
-        question,
-        2000,
-    )
+    question
+)
 
     if not safe_document_text:
         raise ValueError(
