@@ -1268,6 +1268,56 @@ def get_all_tasks(
     return all_tasks
 
 
+
+# =========================================================
+# CALCULATE NEXT REMINDER DATE
+# =========================================================
+
+def calculate_next_reminder_date(
+    current_date,
+    repeat_type,
+):
+    """
+    Calculate the next due date for a recurring reminder.
+    Returns None for non-recurring reminders.
+    """
+    if not current_date:
+        return None
+
+    repeat = (repeat_type or "none").lower()
+
+    if repeat == "none":
+        return None
+
+    try:
+        from datetime import date as date_type
+        from dateutil.relativedelta import relativedelta
+
+        if isinstance(current_date, date_type):
+            current = current_date
+        else:
+            current = datetime.fromisoformat(
+                str(current_date)
+            ).date()
+
+        if repeat == "daily":
+            next_date = current + relativedelta(days=1)
+        elif repeat == "weekly":
+            next_date = current + relativedelta(weeks=1)
+        elif repeat == "monthly":
+            next_date = current + relativedelta(months=1)
+        else:
+            return None
+
+        return next_date.isoformat()
+
+    except Exception as error:
+        logger.error(
+            "Failed to calculate next reminder date: %s",
+            type(error).__name__,
+        )
+        return None
+
 # =========================================================
 # REMINDERS
 # =========================================================
@@ -1493,17 +1543,74 @@ def mark_reminder_as_shown(
     reminder_id,
     user_id,
 ):
+    """
+    Mark a reminder as shown/read.
+
+    For recurring dashboard-only reminders (email disabled),
+    advance to the next occurrence immediately so the same
+    reminder can appear again later.
+    """
+
+    current_response = (
+        supabase
+        .table("reminders")
+        .select(
+            "id, due_date, repeat_type, email_notification"
+        )
+        .eq(
+            "id",
+            reminder_id,
+        )
+        .eq(
+            "user_id",
+            user_id,
+        )
+        .limit(1)
+        .execute()
+    )
+
+    if not current_response.data:
+        return []
+
+    reminder = current_response.data[0]
+
+    repeat_type = (
+        reminder.get("repeat_type")
+        or "none"
+    ).lower()
+
+    email_enabled = bool(
+        reminder.get("email_notification")
+    )
+
+    update_data = {
+        "dashboard_shown": True,
+        "read": True,
+    }
+
+    # If there is no email channel, the dashboard is the
+    # completion trigger for a recurring reminder.
+    if (
+        repeat_type != "none"
+        and not email_enabled
+    ):
+        next_due_date = calculate_next_reminder_date(
+            reminder.get("due_date"),
+            repeat_type,
+        )
+
+        if next_due_date:
+            update_data = {
+                "due_date": next_due_date,
+                "email_sent": False,
+                "read": False,
+                "dashboard_shown": False,
+            }
 
     response = (
         supabase
         .table("reminders")
-        .update({
-            "dashboard_shown":
-                True,
-
-            "read":
-                True,
-        })
+        .update(update_data)
         .eq(
             "id",
             reminder_id,

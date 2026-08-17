@@ -1,3 +1,6 @@
+import asyncio
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -8,6 +11,36 @@ from app.routes.tasks import router as tasks_router
 from app.routes.reminders import router as reminders_router
 from app.routes.settings import router as settings_router
 from app.routes.subscription import router as subscription_router
+from app.services.scheduler import check_reminders
+
+
+# =========================================================
+# LIFESPAN
+# =========================================================
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    reminder_task = asyncio.create_task(
+        check_reminders()
+    )
+
+    print(
+        "Reminder scheduler background task started"
+    )
+
+    try:
+        yield
+    finally:
+        reminder_task.cancel()
+
+        try:
+            await reminder_task
+        except asyncio.CancelledError:
+            pass
+
+        print(
+            "Reminder scheduler background task stopped"
+        )
 
 
 # =========================================================
@@ -17,6 +50,7 @@ from app.routes.subscription import router as subscription_router
 app = FastAPI(
     title="Life AiOS API",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 
@@ -37,24 +71,20 @@ class SecurityHeadersMiddleware(
             request
         )
 
-        # Prevent MIME-type sniffing
         response.headers[
             "X-Content-Type-Options"
         ] = "nosniff"
 
-        # Prevent clickjacking
         response.headers[
             "X-Frame-Options"
         ] = "DENY"
 
-        # Control referrer information
         response.headers[
             "Referrer-Policy"
         ] = (
             "strict-origin-when-cross-origin"
         )
 
-        # Disable unnecessary browser capabilities
         response.headers[
             "Permissions-Policy"
         ] = (
@@ -63,9 +93,7 @@ class SecurityHeadersMiddleware(
             "geolocation=()"
         )
 
-        # HSTS only when actually using HTTPS
         if request.url.scheme == "https":
-
             response.headers[
                 "Strict-Transport-Security"
             ] = (
@@ -87,22 +115,14 @@ app.add_middleware(
 
 app.add_middleware(
     CORSMiddleware,
-
-  allow_origins=[
-    "http://localhost:3000",
-    "https://life-aios-flax.vercel.app",
-    "https://life-aios-khaf087w6-perso-b1ad.vercel.app",
-],
-
+    allow_origins=[
+        "http://localhost:3000",
+        "https://life-aios-flax.vercel.app",
+        "https://life-aios-khaf087w6-perso-b1ad.vercel.app",
+    ],
     allow_credentials=True,
-
-    allow_methods=[
-        "*",
-    ],
-
-    allow_headers=[
-        "*",
-    ],
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 
@@ -141,7 +161,6 @@ app.include_router(
 
 @app.get("/")
 async def root():
-
     return {
         "status": "ok",
         "service": "Life AiOS API",
@@ -154,7 +173,6 @@ async def root():
 
 @app.get("/health")
 async def health():
-
     return {
         "status": "healthy",
     }
