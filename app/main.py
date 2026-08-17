@@ -88,9 +88,11 @@ app.add_middleware(
 app.add_middleware(
     CORSMiddleware,
 
-    allow_origins=[
-        "http://localhost:3000",
-    ],
+  allow_origins=[
+    "http://localhost:3000",
+    "https://life-aios-flax.vercel.app",
+    "https://life-aios-khaf087w6-perso-b1ad.vercel.app",
+],
 
     allow_credentials=True,
 
