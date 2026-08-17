@@ -110,7 +110,6 @@ async def dashboard_stats(
             detail="Failed to load dashboard statistics",
         )
 
-
 # =========================================================
 # DAILY BRIEFING
 # =========================================================
@@ -534,6 +533,7 @@ Document Text:
         print(
             "Ask all documents AI error:",
             type(error).__name__,
+            str(error),
         )
 
         raise HTTPException(
