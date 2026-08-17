@@ -230,8 +230,9 @@ This is an automated message from Life AiOS.
 
     except Exception as error:
         logger.error(
-            "Resend send failed: %s",
+            "Resend send failed: %s - %s",
             type(error).__name__,
+            str(error),
         )
 
         return None
