@@ -1588,12 +1588,11 @@ def mark_reminder_as_shown(
         "read": True,
     }
 
-    # If there is no email channel, the dashboard is the
-    # completion trigger for a recurring reminder.
-    if (
-        repeat_type != "none"
-        and not email_enabled
-    ):
+    # For every recurring reminder, marking the dashboard
+    # notification as shown advances it to the next occurrence.
+    # Dashboard and email delivery are independent channels, so
+    # a Resend failure must never block the next dashboard reminder.
+    if repeat_type != "none":
         next_due_date = calculate_next_reminder_date(
             reminder.get("due_date"),
             repeat_type,
