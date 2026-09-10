@@ -116,10 +116,12 @@ app.add_middleware(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "http://localhost:3000",
-        "https://life-aios-flax.vercel.app",
-        "https://life-aios-khaf087w6-perso-b1ad.vercel.app",
-    ],
+    "http://localhost:3000",
+    "https://life-aios-flax.vercel.app",
+    "https://life-aios-khaf087w6-perso-b1ad.vercel.app",
+    "https://lifeaios.online",
+    "https://www.lifeaios.online",
+],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
