@@ -200,6 +200,20 @@ def _decrypt_document(document):
 
 FREE_DOCUMENT_LIMIT = 5
 PRO_MONTHLY_DOCUMENT_LIMIT = 20
+PRO_PLUS_MONTHLY_DOCUMENT_LIMIT = 50
+
+
+def _get_paid_plan_limit(plan):
+    """
+    Return the monthly document limit for a paid plan.
+    """
+    if plan == "pro_plus":
+        return PRO_PLUS_MONTHLY_DOCUMENT_LIMIT
+
+    if plan == "pro":
+        return PRO_MONTHLY_DOCUMENT_LIMIT
+
+    return 0
 
 
 def check_document_upload_quota(
@@ -214,6 +228,9 @@ def check_document_upload_quota(
 
     PRO:
         20 documents per subscription period.
+
+    PRO PLUS:
+        50 documents per subscription period.
 
     The backend calculates usage directly from the
     documents table. The frontend cannot modify usage.
@@ -291,15 +308,17 @@ def check_document_upload_quota(
         "trialing",
     }:
 
+        inactive_limit = (
+            FREE_DOCUMENT_LIMIT
+            if plan == "free"
+            else _get_paid_plan_limit(plan)
+        )
+
         return {
             "allowed": False,
             "plan": plan,
             "used": 0,
-            "limit": (
-                FREE_DOCUMENT_LIMIT
-                if plan == "free"
-                else PRO_MONTHLY_DOCUMENT_LIMIT
-            ),
+            "limit": inactive_limit,
             "remaining": 0,
             "reason": "subscription_inactive",
         }
@@ -350,10 +369,13 @@ def check_document_upload_quota(
         }
 
     # =====================================================
-    # PRO PLAN
+    # PRO / PRO PLUS PLAN
     # =====================================================
 
-    if plan == "pro":
+    if plan in {
+        "pro",
+        "pro_plus",
+    }:
 
         period_start = subscription.get(
             "current_period_start"
@@ -363,18 +385,22 @@ def check_document_upload_quota(
             "current_period_end"
         )
 
+        limit = _get_paid_plan_limit(
+            plan
+        )
+
         # -------------------------------------------------
         # Safety:
-        # Pro subscription must have a valid period.
+        # Paid subscription must have a valid period.
         # -------------------------------------------------
 
         if not period_start or not period_end:
 
             return {
                 "allowed": False,
-                "plan": "pro",
+                "plan": plan,
                 "used": 0,
-                "limit": PRO_MONTHLY_DOCUMENT_LIMIT,
+                "limit": limit,
                 "remaining": 0,
                 "reason": "subscription_period_missing",
             }
@@ -412,22 +438,26 @@ def check_document_upload_quota(
         )
 
         remaining = max(
-            PRO_MONTHLY_DOCUMENT_LIMIT - used,
+            limit - used,
             0,
         )
 
         return {
             "allowed": (
-                used < PRO_MONTHLY_DOCUMENT_LIMIT
+                used < limit
             ),
-            "plan": "pro",
+            "plan": plan,
             "used": used,
-            "limit": PRO_MONTHLY_DOCUMENT_LIMIT,
+            "limit": limit,
             "remaining": remaining,
             "reason": (
                 "ok"
-                if used < PRO_MONTHLY_DOCUMENT_LIMIT
-                else "pro_monthly_limit_reached"
+                if used < limit
+                else (
+                    "pro_plus_monthly_limit_reached"
+                    if plan == "pro_plus"
+                    else "pro_monthly_limit_reached"
+                )
             ),
         }
 

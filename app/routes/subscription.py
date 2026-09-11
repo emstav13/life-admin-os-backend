@@ -5,6 +5,7 @@ from app.services.db_service import (
     check_document_upload_quota,
     FREE_DOCUMENT_LIMIT,
     PRO_MONTHLY_DOCUMENT_LIMIT,
+    PRO_PLUS_MONTHLY_DOCUMENT_LIMIT,
     supabase,
 )
 
@@ -101,6 +102,12 @@ async def get_subscription(
 
         documents_limit = (
             PRO_MONTHLY_DOCUMENT_LIMIT
+        )
+
+    elif plan == "pro_plus":
+
+        documents_limit = (
+            PRO_PLUS_MONTHLY_DOCUMENT_LIMIT
         )
 
     else:
