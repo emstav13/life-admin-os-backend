@@ -11,6 +11,7 @@ from app.routes.tasks import router as tasks_router
 from app.routes.reminders import router as reminders_router
 from app.routes.settings import router as settings_router
 from app.routes.subscription import router as subscription_router
+from app.routes.stripe import router as stripe_router
 from app.services.scheduler import check_reminders
 
 
@@ -116,12 +117,12 @@ app.add_middleware(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-    "http://localhost:3000",
-    "https://life-aios-flax.vercel.app",
-    "https://life-aios-khaf087w6-perso-b1ad.vercel.app",
-    "https://lifeaios.online",
-    "https://www.lifeaios.online",
-],
+        "http://localhost:3000",
+        "https://life-aios-flax.vercel.app",
+        "https://life-aios-khaf087w6-perso-b1ad.vercel.app",
+        "https://lifeaios.online",
+        "https://www.lifeaios.online",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -138,6 +139,10 @@ app.include_router(
 
 app.include_router(
     subscription_router
+)
+
+app.include_router(
+    stripe_router
 )
 
 app.include_router(
