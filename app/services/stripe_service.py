@@ -246,6 +246,27 @@ def create_checkout_session(
     return checkout_url
 
 
+def _event_data_object(event: Any) -> Any:
+    """Return the webhook event object without assuming it is a dict."""
+    data = getattr(event, "data", None)
+
+    if data is None:
+        return None
+
+    return getattr(data, "object", None)
+
+
+def _object_value(obj: Any, key: str, default: Any = None) -> Any:
+    """Read a StripeObject value safely for both object and dict inputs."""
+    if obj is None:
+        return default
+
+    if isinstance(obj, dict):
+        return obj.get(key, default)
+
+    return getattr(obj, key, default)
+
+
 def handle_stripe_webhook(
     *,
     payload: bytes,
@@ -285,26 +306,24 @@ def handle_stripe_webhook(
             detail="Invalid Stripe webhook signature.",
         ) from exc
 
-    event_type = event.get("type")
-    data_object = (
-        event.get("data", {})
-        .get("object")
-    ) or {}
+    event_type = _object_value(event, "type")
+    data_object = _event_data_object(event)
 
     if event_type == "checkout.session.completed":
-        session_mode = data_object.get("mode")
+        session_mode = _object_value(data_object, "mode")
 
         if session_mode != "subscription":
             return
 
-        subscription_id = data_object.get(
-            "subscription"
+        subscription_id = _object_value(
+            data_object,
+            "subscription",
         )
 
-        fallback_user_id = (
-            data_object
-            .get("metadata", {})
-            .get("user_id")
+        metadata = _object_value(data_object, "metadata") or {}
+        fallback_user_id = _object_value(
+            metadata,
+            "user_id",
         )
 
         if not subscription_id:
@@ -313,10 +332,8 @@ def handle_stripe_webhook(
         client = _require_stripe()
 
         try:
-            subscription = (
-                client.v1.subscriptions.retrieve(
-                    subscription_id
-                )
+            subscription = client.v1.subscriptions.retrieve(
+                subscription_id
             )
 
             _upsert_subscription_from_stripe(
@@ -354,7 +371,7 @@ def handle_stripe_webhook(
             return
 
         status = (
-            data_object.get("status")
+            _object_value(data_object, "status")
             or (
                 "canceled"
                 if event_type
@@ -367,13 +384,15 @@ def handle_stripe_webhook(
             "plan": plan,
             "status": status,
             "current_period_start": _normalize_timestamp(
-                data_object.get(
-                    "current_period_start"
+                _object_value(
+                    data_object,
+                    "current_period_start",
                 )
             ),
             "current_period_end": _normalize_timestamp(
-                data_object.get(
-                    "current_period_end"
+                _object_value(
+                    data_object,
+                    "current_period_end",
                 )
             ),
         }
@@ -389,8 +408,9 @@ def handle_stripe_webhook(
         return
 
     if event_type == "invoice.payment_failed":
-        subscription_id = data_object.get(
-            "subscription"
+        subscription_id = _object_value(
+            data_object,
+            "subscription",
         )
 
         if not subscription_id:
@@ -399,10 +419,8 @@ def handle_stripe_webhook(
         client = _require_stripe()
 
         try:
-            subscription = (
-                client.v1.subscriptions.retrieve(
-                    subscription_id
-                )
+            subscription = client.v1.subscriptions.retrieve(
+                subscription_id
             )
         except stripe.StripeError as exc:
             raise HTTPException(
@@ -425,21 +443,21 @@ def handle_stripe_webhook(
 
 
 def _subscription_plan_from_event_object(
-    subscription: dict[str, Any],
+    subscription: Any,
 ) -> str | None:
-    metadata = subscription.get("metadata") or {}
+    metadata = _object_value(subscription, "metadata") or {}
 
-    plan = metadata.get("plan")
+    plan = _object_value(metadata, "plan")
 
     if plan in {"pro", "pro_plus"}:
         return plan
 
-    items = subscription.get("items") or {}
-    data = items.get("data") or []
+    items = _object_value(subscription, "items") or {}
+    data = _object_value(items, "data") or []
 
     for item in data:
-        price = item.get("price") or {}
-        price_id = price.get("id")
+        price = _object_value(item, "price") or {}
+        price_id = _object_value(price, "id")
 
         plan = _get_plan_from_price_id(price_id)
 
@@ -450,9 +468,9 @@ def _subscription_plan_from_event_object(
 
 
 def _user_id_from_event_object(
-    subscription: dict[str, Any],
+    subscription: Any,
 ) -> str | None:
-    metadata = subscription.get("metadata") or {}
-    user_id = metadata.get("user_id")
+    metadata = _object_value(subscription, "metadata") or {}
+    user_id = _object_value(metadata, "user_id")
 
     return str(user_id) if user_id else None
