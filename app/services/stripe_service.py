@@ -80,19 +80,45 @@ def _get_plan_from_price_id(price_id: str | None) -> str | None:
 
 
 def _subscription_plan(subscription: Any) -> str | None:
-    metadata = getattr(subscription, "metadata", None)
+    metadata = (
+        subscription.get("metadata")
+        if isinstance(subscription, dict)
+        else getattr(subscription, "metadata", None)
+    )
 
     if metadata:
-        plan = metadata.get("plan")
+        plan = (
+            metadata.get("plan")
+            if isinstance(metadata, dict)
+            else getattr(metadata, "plan", None)
+        )
+
         if plan in {"pro", "pro_plus"}:
             return plan
 
-    items = getattr(subscription, "items", None)
-    data = getattr(items, "data", None) or []
+    items = (
+        subscription.get("items")
+        if isinstance(subscription, dict)
+        else getattr(subscription, "items", None)
+    )
+
+    data = (
+        items.get("data")
+        if isinstance(items, dict)
+        else getattr(items, "data", None)
+    ) or []
 
     for item in data:
-        price = getattr(item, "price", None)
-        price_id = getattr(price, "id", None)
+        price = (
+            item.get("price")
+            if isinstance(item, dict)
+            else getattr(item, "price", None)
+        )
+        price_id = (
+            price.get("id")
+            if isinstance(price, dict)
+            else getattr(price, "id", None)
+        )
 
         plan = _get_plan_from_price_id(price_id)
         if plan:
@@ -107,7 +133,10 @@ def _subscription_user_id(subscription: Any) -> str | None:
     if not metadata:
         return None
 
-    user_id = metadata.get("user_id")
+    if isinstance(metadata, dict):
+        user_id = metadata.get("user_id")
+    else:
+        user_id = getattr(metadata, "user_id", None)
 
     if not user_id:
         return None
@@ -246,18 +275,8 @@ def create_checkout_session(
     return checkout_url
 
 
-def _event_data_object(event: Any) -> Any:
-    """Return the webhook event object without assuming it is a dict."""
-    data = getattr(event, "data", None)
-
-    if data is None:
-        return None
-
-    return getattr(data, "object", None)
-
-
 def _object_value(obj: Any, key: str, default: Any = None) -> Any:
-    """Read a StripeObject value safely for both object and dict inputs."""
+    """Read a value safely from either a dict or a StripeObject."""
     if obj is None:
         return default
 
@@ -265,6 +284,16 @@ def _object_value(obj: Any, key: str, default: Any = None) -> Any:
         return obj.get(key, default)
 
     return getattr(obj, key, default)
+
+
+def _event_data_object(event: Any) -> Any:
+    """Return the webhook event data object without assuming it is a dict."""
+    data = getattr(event, "data", None)
+
+    if data is None:
+        return None
+
+    return getattr(data, "object", None)
 
 
 def handle_stripe_webhook(
@@ -332,8 +361,10 @@ def handle_stripe_webhook(
         client = _require_stripe()
 
         try:
-            subscription = client.v1.subscriptions.retrieve(
-                subscription_id
+            subscription = (
+                client.v1.subscriptions.retrieve(
+                    subscription_id
+                )
             )
 
             _upsert_subscription_from_stripe(
@@ -419,8 +450,10 @@ def handle_stripe_webhook(
         client = _require_stripe()
 
         try:
-            subscription = client.v1.subscriptions.retrieve(
-                subscription_id
+            subscription = (
+                client.v1.subscriptions.retrieve(
+                    subscription_id
+                )
             )
         except stripe.StripeError as exc:
             raise HTTPException(
