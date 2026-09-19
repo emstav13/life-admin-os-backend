@@ -251,11 +251,41 @@ def _find_user_stripe_subscription(
                 },
             )
 
-            for subscription in subscriptions.data or []:
-                subscription_user_id = _subscription_user_id(subscription)
+            matching_subscriptions = [
+                subscription
+                for subscription in (subscriptions.data or [])
+                if _subscription_user_id(subscription) == str(user_id)
+            ]
 
-                if subscription_user_id == str(user_id):
-                    return subscription
+            if matching_subscriptions:
+                # Prefer a currently usable subscription. If several exist,
+                # use the newest one so an old canceled subscription can
+                # never shadow a newer purchase.
+                status_priority = {
+                    "active": 0,
+                    "trialing": 1,
+                    "past_due": 2,
+                    "unpaid": 3,
+                    "paused": 4,
+                    "incomplete": 5,
+                    "incomplete_expired": 6,
+                    "canceled": 7,
+                }
+
+                matching_subscriptions.sort(
+                    key=lambda item: (
+                        status_priority.get(
+                            _object_value(item, "status"),
+                            99,
+                        ),
+                        -int(
+                            _object_value(item, "created", 0)
+                            or 0
+                        ),
+                    )
+                )
+
+                return matching_subscriptions[0]
 
     except stripe.StripeError as exc:
         raise HTTPException(
@@ -403,6 +433,53 @@ def create_checkout_session(
 ) -> str:
     client = _require_stripe()
     price_id = _price_id_for_plan(plan)
+
+    existing_subscription = _find_user_stripe_subscription(
+        user_id=user_id,
+        email=email,
+    )
+
+    if existing_subscription is not None:
+        existing_status = _object_value(
+            existing_subscription,
+            "status",
+        )
+        existing_plan = _subscription_plan(
+            existing_subscription
+        )
+        cancel_at_period_end = bool(
+            _object_value(
+                existing_subscription,
+                "cancel_at_period_end",
+                False,
+            )
+        )
+
+        if existing_status in {
+            "active",
+            "trialing",
+            "past_due",
+            "unpaid",
+            "incomplete",
+        }:
+            if cancel_at_period_end:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        "Your subscription is scheduled for cancellation. "
+                        "Reactivate it from Manage subscription before "
+                        "starting a new checkout."
+                    ),
+                )
+
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"You already have an active {existing_plan or 'paid'} "
+                    "subscription. Manage your current subscription instead "
+                    "of starting a second checkout."
+                ),
+            )
 
     metadata = {
         "user_id": str(user_id),
