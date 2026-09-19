@@ -10,6 +10,7 @@ from app.services.stripe_service import (
     get_user_stripe_subscription_state,
     handle_stripe_webhook,
     reactivate_user_subscription,
+    upgrade_user_subscription_to_pro_plus,
 )
 
 
@@ -63,6 +64,16 @@ async def reactivate_subscription(
     current_user=Depends(get_current_user),
 ):
     return reactivate_user_subscription(
+        user_id=current_user.id,
+        email=getattr(current_user, "email", None),
+    )
+
+
+@router.post("/subscription/upgrade")
+async def upgrade_subscription(
+    current_user=Depends(get_current_user),
+):
+    return upgrade_user_subscription_to_pro_plus(
         user_id=current_user.id,
         email=getattr(current_user, "email", None),
     )
