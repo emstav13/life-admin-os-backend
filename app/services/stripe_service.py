@@ -322,6 +322,106 @@ def get_user_stripe_subscription_state(
     }
 
 
+def upgrade_user_subscription_to_pro_plus(
+    *,
+    user_id: str,
+    email: str | None,
+) -> dict[str, Any]:
+    client = _require_stripe()
+
+    subscription = _find_user_stripe_subscription(
+        user_id=user_id,
+        email=email,
+    )
+
+    if subscription is None:
+        raise HTTPException(
+            status_code=404,
+            detail="No active Stripe subscription was found.",
+        )
+
+    status = _object_value(subscription, "status")
+    if status not in {"active", "trialing", "past_due", "unpaid"}:
+        raise HTTPException(
+            status_code=400,
+            detail="This subscription cannot be upgraded right now.",
+        )
+
+    if bool(_object_value(subscription, "cancel_at_period_end", False)):
+        raise HTTPException(
+            status_code=409,
+            detail="Reactivate your subscription before upgrading.",
+        )
+
+    current_plan = _subscription_plan(subscription)
+    if current_plan == "pro_plus":
+        return {
+            "plan": "pro_plus",
+            "status": status,
+            "cancel_at_period_end": False,
+            "current_period_end": _normalize_timestamp(
+                _object_value(subscription, "current_period_end")
+            ),
+        }
+
+    if current_plan != "pro":
+        raise HTTPException(
+            status_code=400,
+            detail="Only Pro subscriptions can be upgraded to Pro Plus.",
+        )
+
+    price_id = _price_id_for_plan("pro_plus")
+
+    items = _object_value(subscription, "items")
+    data = (
+        items.get("data")
+        if isinstance(items, dict)
+        else getattr(items, "data", None)
+    ) or []
+
+    if not data:
+        raise HTTPException(
+            status_code=502,
+            detail="Stripe subscription has no billable item.",
+        )
+
+    item_id = _object_value(data[0], "id")
+    if not item_id:
+        raise HTTPException(
+            status_code=502,
+            detail="Stripe subscription item is missing.",
+        )
+
+    try:
+        updated_item = client.v1.subscription_items.update(
+            item_id,
+            params={
+                "price": price_id,
+                "proration_behavior": "create_prorations",
+            },
+        )
+        updated = client.v1.subscriptions.retrieve(
+            _object_value(subscription, "id"),
+        )
+        _upsert_subscription_from_stripe(updated)
+    except stripe.StripeError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail="Unable to upgrade the Stripe subscription.",
+        ) from exc
+
+    return {
+        "plan": _subscription_plan(updated) or "pro_plus",
+        "status": _object_value(updated, "status") or "active",
+        "cancel_at_period_end": bool(
+            _object_value(updated, "cancel_at_period_end", False)
+        ),
+        "current_period_end": _normalize_timestamp(
+            _object_value(updated, "current_period_end")
+        ),
+    }
+
+
 def cancel_user_subscription(
     *,
     user_id: str,
