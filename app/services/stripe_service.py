@@ -217,6 +217,184 @@ def _upsert_subscription_from_stripe(
         )
 
 
+
+def _find_user_stripe_subscription(
+    *,
+    user_id: str,
+    email: str | None,
+) -> Any | None:
+    """Find the Stripe subscription that belongs to the authenticated user."""
+    client = _require_stripe()
+
+    if not email:
+        return None
+
+    try:
+        customers = client.v1.customers.list(
+            params={
+                "email": email,
+                "limit": 100,
+            },
+        )
+
+        for customer in customers.data or []:
+            customer_id = _object_value(customer, "id")
+
+            if not customer_id:
+                continue
+
+            subscriptions = client.v1.subscriptions.list(
+                params={
+                    "customer": customer_id,
+                    "status": "all",
+                    "limit": 100,
+                },
+            )
+
+            for subscription in subscriptions.data or []:
+                subscription_user_id = _subscription_user_id(subscription)
+
+                if subscription_user_id == str(user_id):
+                    return subscription
+
+    except stripe.StripeError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail="Unable to retrieve the Stripe subscription.",
+        ) from exc
+
+    return None
+
+
+def get_user_stripe_subscription_state(
+    *,
+    user_id: str,
+    email: str | None,
+) -> dict[str, Any] | None:
+    subscription = _find_user_stripe_subscription(
+        user_id=user_id,
+        email=email,
+    )
+
+    if subscription is None:
+        return None
+
+    return {
+        "id": _object_value(subscription, "id"),
+        "plan": _subscription_plan(subscription),
+        "status": _object_value(subscription, "status") or "inactive",
+        "cancel_at_period_end": bool(
+            _object_value(subscription, "cancel_at_period_end", False)
+        ),
+        "current_period_end": _normalize_timestamp(
+            _object_value(subscription, "current_period_end")
+        ),
+    }
+
+
+def cancel_user_subscription(
+    *,
+    user_id: str,
+    email: str | None,
+) -> dict[str, Any]:
+    client = _require_stripe()
+
+    subscription = _find_user_stripe_subscription(
+        user_id=user_id,
+        email=email,
+    )
+
+    if subscription is None:
+        raise HTTPException(
+            status_code=404,
+            detail="No active Stripe subscription was found.",
+        )
+
+    status = _object_value(subscription, "status")
+    if status in {"canceled", "incomplete_expired"}:
+        raise HTTPException(
+            status_code=400,
+            detail="This subscription is already canceled.",
+        )
+
+    try:
+        updated = client.v1.subscriptions.update(
+            _object_value(subscription, "id"),
+            params={
+                "cancel_at_period_end": True,
+            },
+        )
+    except stripe.StripeError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail="Unable to cancel the Stripe subscription.",
+        ) from exc
+
+    return {
+        "plan": _subscription_plan(updated),
+        "status": _object_value(updated, "status") or "active",
+        "cancel_at_period_end": bool(
+            _object_value(updated, "cancel_at_period_end", False)
+        ),
+        "current_period_end": _normalize_timestamp(
+            _object_value(updated, "current_period_end")
+        ),
+    }
+
+
+def reactivate_user_subscription(
+    *,
+    user_id: str,
+    email: str | None,
+) -> dict[str, Any]:
+    client = _require_stripe()
+
+    subscription = _find_user_stripe_subscription(
+        user_id=user_id,
+        email=email,
+    )
+
+    if subscription is None:
+        raise HTTPException(
+            status_code=404,
+            detail="No Stripe subscription was found.",
+        )
+
+    if not _object_value(
+        subscription,
+        "cancel_at_period_end",
+        False,
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="This subscription is not scheduled for cancellation.",
+        )
+
+    try:
+        updated = client.v1.subscriptions.update(
+            _object_value(subscription, "id"),
+            params={
+                "cancel_at_period_end": False,
+            },
+        )
+    except stripe.StripeError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail="Unable to reactivate the Stripe subscription.",
+        ) from exc
+
+    return {
+        "plan": _subscription_plan(updated),
+        "status": _object_value(updated, "status") or "active",
+        "cancel_at_period_end": bool(
+            _object_value(updated, "cancel_at_period_end", False)
+        ),
+        "current_period_end": _normalize_timestamp(
+            _object_value(updated, "current_period_end")
+        ),
+    }
+
+
 def create_checkout_session(
     *,
     user_id: str,
@@ -412,7 +590,12 @@ def handle_stripe_webhook(
         )
 
         payload_update = {
-            "plan": plan,
+            "plan": (
+                "free"
+                if event_type == "customer.subscription.deleted"
+                or status == "canceled"
+                else plan
+            ),
             "status": status,
             "current_period_start": _normalize_timestamp(
                 _object_value(
